@@ -1,0 +1,16 @@
+{
+  "id": "1729314",
+  "name": "chat_room",
+  "font_family": "iconfont",
+  "css_prefix_text": "icon-",
+  "description": "",
+  "glyphs": [
+    {
+      "icon_id": "1381363",
+      "name": "enter",
+      "font_class": "enter",
+      "unicode": "e61d",
+      "unicode_decimal": 58909
+    }
+  ]
+}

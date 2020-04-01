@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>chat room</title>
+    <link href="https://cdn.bootcss.com/element-ui/2.13.0/theme-chalk/index.css" rel="stylesheet">
+    <link href="./css/iconfont.css" rel="stylesheet">
+    <style>
+      html, body {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      #app {
+        width: 800px;
+        height: 600px;
+        padding: 10px;
+        background-color: #eee;
+        box-sizing: border-box;
+      }
+      .box-card {
+        margin-top: 10px;
+        height: 86%;
+        overflow-y: scroll;
+      }
+      .content {
+        font-weight: bold;
+      }
+      .el-container {
+        height: 100%;
+      }
+      .el-aside {
+        background-color: #fff;
+        padding: 20px;
+      }
+    </style>
+    <script src="https://cdn.bootcss.com/vue/2.6.11/vue.min.js"></script>
+    <script src="https://cdn.bootcss.com/element-ui/2.13.0/index.js"></script>
+    <script src="https://cdn.bootcss.com/axios/0.19.2/axios.min.js"></script>
+    <script src="https://cdn.bootcss.com/sockjs-client/1.4.0/sockjs.min.js"></script>
+    <script src="https://cdn.bootcss.com/moment.js/2.24.0/moment.min.js"></script>
+    <script src="https://cdn.bootcss.com/moment.js/2.24.0/locale/zh-cn.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <el-container>
+        <el-aside width="200px">
+          <el-table
+            :data="userList"
+            style="width: 100%"
+            v-show="userList.length"
+            highlight-current-row
+            @current-change="atUser">
+            <el-table-column label="在线用户">
+              <template slot-scope="scope">
+                <i :class="scope.row.gender === 'male' ? 'el-icon-male' : 'el-icon-female'"></i>
+                {{ scope.row.username }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-aside>
+        <el-container>
+          <el-main>
+            <el-row :gutter="10">
+              <el-col :span="10">
+                <el-input v-model="username" :disabled="usernameIptDisabled" placeholder="请输入昵称"></el-input>
+              </el-col>
+              <el-col :span="6">
+                <el-radio-group v-model="gender" :disabled="genderRadiosDisabled">
+                  <el-radio-button label="male"><i class="el-icon-male"></i></el-radio-button>
+                  <el-radio-button label="female"><i class="el-icon-female"></i></el-radio-button>
+                </el-radio-group>
+              </el-col>
+              <el-col :span="6">
+                <el-button type="primary" plain @click="join" v-show="!chatting">加入聊天室</el-button>
+                <el-button type="danger" plain @click="exit" v-show="chatting">退出聊天室</el-button>
+              </el-col>
+            </el-row>
+            <el-card class="box-card" ref="chatPanel">
+              <div>
+                <p v-for="m in messages">
+                  {{ m.fromUsername }} {{ m.timestamp | dateFormat('HH:mm:ss') }} :
+                  <span class="content">{{ m.content }}</span>
+                </p>
+              </div>
+            </el-card>
+          </el-main>
+          <el-footer>
+            <el-input :placeholder="iptPlaceHolder" v-model="content" class="input-with-select" :disabled="publishDisabled">
+              <el-button slot="append" icon="iconfont icon-enter" @click="publish" :disabled="publishDisabled"></el-button>
+            </el-input>
+          </el-footer>
+        </el-container>
+      </el-container>
+      
+    </div>
+    <script>
+      new Vue({
+        el: '#app',
+        created () {
+          axios.defaults.withCredentials = true // 允许携带cookie
+        },
+        data: {
+          id: '',
+          username: '',
+          gender: 'male',
+          content: '',
+          to: {},
+          chatting: false,
+          usernameIptDisabled: false,
+          genderRadiosDisabled: false,
+          publishDisabled: true,
+          iptPlaceHolder: '对所有人说',
+          messages: [],
+          userList: [],
+          baseUrl: 'http://127.0.0.1:8080/chat_room',
+          wsBaseUrl: 'ws://127.0.0.1:8080/ws',
+          wsSockJSBaseUrl: 'http://127.0.0.1:8080/ws_sockjs',
+          wsInstance: null
+        },
+        methods: {
+          async join () {
+            if (!this.username) {
+              return this.$message.warning('请先输入昵称')
+            }
+            if (!this.gender) {
+              return this.$message.warning('请先选择性别')
+            }
+            const { data: resp } = await axios.get(`${this.baseUrl}/join?username=${this.username}&gender=${this.gender}`)
+              .catch(error => {
+                console.log('加入聊天室失败：', error)
+                return { data: { code: 0, message: error.message } }
+              })
+            console.log('resp', resp)
+            if (resp.code !== 1) {
+              return this.$message.error(`加入聊天室失败：${resp.message}`)
+            }
+            this.id = resp.data.id
+            this.wsInstance = this.getWSInstance ()
+            this.wsInstance.onopen = event => {
+              console.log('ws.onopen')
+              this.send(`大家好，我是${this.username}`)
+              this.usernameIptDisabled = true
+              this.genderRadiosDisabled = true
+              this.chatting = true
+              this.publishDisabled = false
+            }
+            this.wsInstance.onmessage = event => {
+              console.log('ws.onmessage', event)
+              const message = JSON.parse(event.data)
+              if (Array.isArray(message.userList)) {
+                this.userList = message.userList
+                delete message.userList
+              }
+              if (!message.from) {
+                message.fromUsername = "系统"
+              } else if (message.from === this.id) {
+                message.fromUsername = "我"
+              }
+              this.messages.push(message)
+              this.$nextTick(() => {
+                const div = this.$refs.chatPanel.$el
+                div.scrollTop = div.scrollHeight
+              })
+            }
+            this.wsInstance.onclose = event => {
+              console.log('ws.onclose', event)
+              if (event.code !== 1000) { // 被动关闭ws，比如服务器宕机 1001
+                this.$message.warning('服务器已断开连接')
+                this.exit()
+              }
+            }
+            this.wsInstance.onerror = event => {
+              console.log('ws.onerror', event)
+              this.$message.error('连接服务器失败')
+            }
+          },
+          exit () {
+            if (this.wsInstance) {
+              this.wsInstance.close()
+              this.wsInstance = null
+            }
+            this.usernameIptDisabled = false
+            this.genderRadiosDisabled = false
+            this.chatting = false
+            this.publishDisabled = true
+          },
+          send (content, to) {
+            if (!this.wsInstance) {
+              return this.$message.error('请先加入聊天室')
+            }
+            this.wsInstance.send(JSON.stringify({ content: content, from: this.id, fromUsername: this.username, to }))
+          },
+          publish () {
+            if (!this.content) {
+              this.$message.warning('内容不能为空！')
+              return
+            }
+            this.send(this.content, this.to.id)
+            this.content = ''
+          },
+          getWSInstance () {
+            if ('WebSocket' in window) { // 现代浏览器
+              console.log('WebSocket in window')
+              return new WebSocket(this.wsBaseUrl)
+            } 
+            if ('MozWebSocket' in window) { // 旧版火狐
+              console.log('MozWebSocket in window')
+              return new MozWebSocket(this.wsBaseUrl)
+            }
+            console.log('SockJS')
+            return new SockJS(this.wsSockJSBaseUrl)
+          },
+          atUser (user) {
+            if (user.id === this.id) {
+              this.to = {}
+              this.iptPlaceHolder = '对所有人说'
+              return
+            }
+            this.to = user
+            this.iptPlaceHolder = `对${user.username}说`
+          }
+        },
+        filters: {
+          dateFormat (milliseconds, pattern = 'YYYY-MM-DD HH:mm:ss') {
+            return moment(milliseconds).format(pattern)
+          }
+        }
+      })
+    </script>
+  </body>
+</html>
